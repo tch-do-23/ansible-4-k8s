@@ -1,0 +1,98 @@
+---
+- hosts: k8s-all-r9:children
+  become: true
+  vars:
+    mydir: "/home/ansible"
+    work_dir: "/home/ansible/ansible_DevOps2022"
+    temp_cri_dockerd: "/home/ansible/ansible_DevOps2022/cri-dockerd"
+
+  tasks:
+    - name: Install required for below packages
+      yum:
+        name: "{{ item }}"
+        state: latest
+        update_cache: true
+      loop:
+        - git
+        - wget
+        - curl
+
+    - name: Downloading cri-dockerd binary
+      ansible.builtin.get_url:
+        url: https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.8/cri-dockerd-0.3.8.amd64.tgz
+        dest: "{{ work_dir }}"
+    
+    - name: Creating /home/ansible/ansible_DevOps2022 working directory
+      ansible.builtin.file:
+        path: "{{ work_dir }}"
+        state: directory
+        mode: 0755
+
+    - name: Untarring just downloaded cri-dockerd 
+      ansible.builtin.unarchive: 
+        src: "{{ work_dir }}/cri-dockerd-0.3.8.amd64.tgz"
+        dest: "{{ work_dir }}"
+        remote_src: yes
+
+    - name: Creating a dir for cri-dockerd installation
+      ansible.builtin.file:
+        path: /usr/local/bin
+        state: directory
+        owner: root
+        group: root
+        mode: 0755
+
+    - name: Installing cri-dockerd 
+      ansible.builtin.shell: 
+        chdir: "{{ temp_cri_dockerd }}"
+        cmd: sudo install -o root -g root -m 0755 cri-dockerd /usr/local/bin/cri-dockerd
+
+    - name: Cleaning up temporary cri-dockerd from working dir
+      ansible.builtin.shell: 
+        chdir: "{{ work_dir }}"
+        cmd: rm -rf cri-dockerd*
+
+    - name: Cloning cri-dockerd service files & auto creating a temp_cri-dockerd again
+      ansible.builtin.git:
+        repo: https://github.com/Mirantis/cri-dockerd.git
+        dest: "{{ work_dir }}/cri-dockerd"
+
+    - name: Installing cri-dockerd service files
+      ansible.builtin.shell:
+        chdir: "{{ temp_cri_dockerd }}"
+        cmd: sudo install packaging/systemd/* /etc/systemd/system
+
+    - name: Editing a file using scripts
+      ansible.builtin.shell:
+        cmd: sudo sed -i -e 's,/usr/bin/cri-dockerd,/usr/local/bin/cri-dockerd,' /etc/systemd/system/cri-docker.service
+    
+    - name: Cleaning up temporary cri-dockerd from working dir
+      ansible.builtin.shell: 
+        chdir: "{{ work_dir }}"
+        cmd: rm -rf cri-dockerd*
+
+    - name: Put SELinux in permissive mode, logging actions that would be blocked.
+      ansible.posix.selinux:
+        policy: targeted
+        state: permissive
+
+    - name: Ensure SELinux is set to permissive mode
+      ansible.builtin.lineinfile:
+        path: /etc/selinux/config
+        regexp: '^SELINUX='
+        line: SELINUX=permissive
+
+    - name: Just force systemd to reread configs (2.4 and above)
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Enable cri-docker.service
+      ansible.builtin.systemd_service:
+        name: cri-docker.service
+        enabled: true
+
+    - name: Enable and start cri-docker.socket
+      ansible.builtin.systemd_service:
+        name: cri-docker.socket
+        state: started
+        enabled: true

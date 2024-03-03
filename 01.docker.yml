@@ -1,0 +1,57 @@
+# /home/ansible/01.docker.yml
+---
+- hosts: k8s-all-r9:children
+  become: true
+
+  tasks:
+    - name: Remove docker
+      package:
+        name: docker
+        state: absent
+      loop:
+        - docker
+        - docker-client
+        - docker-client-latest
+        - docker-common
+        - docker-latest
+        - docker-latest-logrotate
+        - docker-logrotate
+        - docker-engine
+
+    - name: Install yum utils which provides yum-config-manager utility in the next task
+      dnf:
+        name: yum-utils
+        state: present
+
+    - name: Register docker repository
+      ansible.builtin.shell: dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+    
+    - name: Add signing key
+      rpm_key:
+        key: "https://download.docker.com/linux/centos/gpg"
+        state: present
+
+    - name: Install docker
+      yum:
+        name: "{{ item }}"
+        state: latest
+        update_cache: true
+      loop:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-buildx-plugin
+        - docker-compose-plugin
+
+    - name: Start & enable docker
+      service:
+        name: "docker"
+        enabled: true
+        state: started
+          
+  handlers:
+    - name: Start & enable docker
+      service:
+        name: docker
+        state: restarted
+        enabled: yes
